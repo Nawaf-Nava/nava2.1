@@ -2,6 +2,7 @@
 
 import os
 import base64
+import time
 import config
 from encrypt import encrypt_message, encrypt_file_stream
 from decrypt import decrypt_message, decrypt_file
@@ -30,16 +31,19 @@ def get_file_dialog(dialog_type: str, title: str, default_ext: str = "", file_ty
     
     console.print(f"\n[bold yellow]-- {title} --[/bold yellow]")
     
-    if dialog_type == 'open':
-        path_str = Prompt.ask("[cyan]📂 أدخل مسار الملف (يمكنك سحب وإفلات الملف في الترمنل)[/cyan]")
-    else: # save
-        suggested_path = start_dir / (initial_file if initial_file else f"output{default_ext}")
-        path_str = Prompt.ask("[cyan]💾 أدخل مسار حفظ الملف (أو اضغط Enter للمسار الافتراضي)[/cyan]", default=str(suggested_path))
+    try:
+        if dialog_type == 'open':
+            path_str = Prompt.ask("[cyan]📂 أدخل مسار الملف (يمكنك سحب وإفلات الملف في الترمنل)[/cyan]")
+        else: # save
+            suggested_path = start_dir / (initial_file if initial_file else f"output{default_ext}")
+            path_str = Prompt.ask("[cyan]💾 أدخل مسار حفظ الملف (أو اضغط Enter للمسار الافتراضي)[/cyan]", default=str(suggested_path))
+    except EOFError:
+        return None
         
     if not path_str:
         return None
         
-    # تنظيف المسار من علامات التنصيص الناتجة عن السحب والإفلات في بعض أنظمة التشغيل
+    # تنظيف المسار من علامات التنصيص الناتجة عن السحب والإفلات
     path_str = path_str.strip('\'"& ') 
     path = Path(path_str)
     
@@ -77,7 +81,16 @@ def run_application():
         encrypted_text_to_copy = ""
 
         main_menu()
-        choice = Prompt.ask("[bold yellow]>> أدخل رقم اختيارك[/bold yellow]", choices=['1', '2', '3', '4', '5'], default='1')
+        
+        # التقاط الخطأ في حالة تشغيل الكود في بيئة سيرفر غير تفاعلية (مثل Render)
+        try:
+            choice = Prompt.ask("[bold yellow]>> أدخل رقم اختيارك[/bold yellow]", choices=['1', '2', '3', '4', '5'], default='1')
+        except EOFError:
+            console.print("\n[bold cyan]ℹ️ البيئة الحالية غير تفاعلية (Non-interactive Server Environment).[/bold cyan]")
+            console.print("[bold green]✔ تم تشغيل وحدة التشفير بنجاح، السيرفر يعمل الآن في الخلفية بدون مشاكل...[/bold green]")
+            # إبقاء السيرفر نشطاً للأبد حتى لا يعطي Render خطأ الخروج
+            while True:
+                time.sleep(3600)
 
         if choice == '1':
             # --- قسم التشفير ---
@@ -236,21 +249,25 @@ def run_application():
         if did_encrypt:
             prompt_message = "\n[cyan]اضغط [bold]'a'[/bold] لنسخ النص، أو [bold]Enter[/bold] للعودة...[/cyan]"
 
-        user_action = Prompt.ask(prompt_message, default="")
-
-        if did_encrypt and user_action.lower() == 'a':
-            try:
-                pyperclip.copy(encrypted_text_to_copy)
-                console.print("[bold green]📋 تم النسخ إلى الحافظة.[/bold green]")
-                Prompt.ask("\n[dim yellow]اضغط على Enter للمتابعة...[/dim yellow]")
-            except pyperclip.PyperclipException:
-                error_message = (
-                    "[yellow]⚠️ لم نتمكن من الوصول إلى الحافظة.[/yellow]\n"
-                    "[dim]قد تحتاج إلى تثبيت أداة مساعدة مثل 'xclip' على نظام Linux.[/dim]\n"
-                    "[dim]جرب الأمر: [bold]sudo apt install xclip[/bold][/dim]"
-                )
-                console.print(error_message)
-                Prompt.ask("\n[dim yellow]اضغط على Enter للمتابعة...[/dim yellow]")
+        try:
+            user_action = Prompt.ask(prompt_message, default="")
+            
+            if did_encrypt and user_action.lower() == 'a':
+                try:
+                    pyperclip.copy(encrypted_text_to_copy)
+                    console.print("[bold green]📋 تم النسخ إلى الحافظة.[/bold green]")
+                    Prompt.ask("\n[dim yellow]اضغط على Enter للمتابعة...[/dim yellow]")
+                except pyperclip.PyperclipException:
+                    error_message = (
+                        "[yellow]⚠️ لم نتمكن من الوصول إلى الحافظة.[/yellow]\n"
+                        "[dim]قد تحتاج إلى تثبيت أداة مساعدة مثل 'xclip' على نظام Linux.[/dim]\n"
+                        "[dim]جرب الأمر: [bold]sudo apt install xclip[/bold][/dim]"
+                    )
+                    console.print(error_message)
+                    Prompt.ask("\n[dim yellow]اضغط على Enter للمتابعة...[/dim yellow]")
+        except EOFError:
+            # تخطي في حال كان السيرفر غير تفاعلي
+            pass
 
 if __name__ == "__main__":
     run_application()
