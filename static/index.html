@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>نظام التشفير المظلم | Nava Cryptography</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Tajawal', sans-serif; }
+    </style>
+</head>
+<body class="bg-gray-950 text-gray-100 min-h-screen flex flex-col items-center justify-center p-4">
+
+    <div class="w-full max-w-2xl bg-gray-900 border border-gray-800 rounded-2xl shadow-2xl p-6 md:p-8">
+        <div class="text-center mb-8">
+            <h1 class="text-3xl font-bold text-emerald-400 mb-2">👁️‍🗨️ نظام التشفير المظلم</h1>
+            <p class="text-gray-400 text-sm">واجهة الويب الآمنة لتشفير النصوص والتعويذات البرمجية</p>
+        </div>
+
+        <!-- Tabs Navigation -->
+        <div class="flex border-b border-gray-800 mb-6">
+            <button onclick="switchTab('encrypt')" id="btn-encrypt" class="flex-1 pb-3 text-center font-bold text-emerald-400 border-b-2 border-emerald-400 transition-all">تشفير رسالة</button>
+            <button onclick="switchTab('decrypt')" id="btn-decrypt" class="flex-1 pb-3 text-center font-bold text-gray-400 hover:text-gray-200 transition-all">فك تشفير</button>
+        </div>
+
+        <!-- Encrypt Form -->
+        <div id="tab-encrypt" class="space-y-4">
+            <div>
+                <label class="block text-sm font-medium text-gray-300 mb-1">الرسالة المراد تشفيرها</label>
+                <textarea id="enc-message" rows="4" class="w-full bg-gray-950 border border-gray-800 rounded-lg p-3 text-gray-100 focus:outline-none focus:border-emerald-500" placeholder="اكتب رسالتك هنا..."></textarea>
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-300 mb-1">كلمة السر (Key)</label>
+                <input type="password" id="enc-key" class="w-full bg-gray-950 border border-gray-800 rounded-lg p-3 text-gray-100 focus:outline-none focus:border-emerald-500" placeholder="أدخل كلمة السر القوية">
+            </div>
+            <button onclick="handleEncrypt()" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 rounded-lg transition-all shadow-lg shadow-emerald-900/40">تشفير النص</button>
+            
+            <div id="enc-result-container" class="hidden mt-4">
+                <label class="block text-sm font-medium text-emerald-400 mb-1">التعويذة الناتجة:</label>
+                <div class="relative">
+                    <textarea id="enc-result" readonly rows="3" class="w-full bg-gray-950 border border-emerald-800/50 rounded-lg p-3 text-emerald-300 text-sm font-mono"></textarea>
+                    <button onclick="copyResult()" class="absolute top-2 left-2 bg-emerald-700 hover:bg-emerald-600 text-xs px-3 py-1.5 rounded text-white">نسخ</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Decrypt Form -->
+        <div id="tab-decrypt" class="space-y-4 hidden">
+            <div>
+                <label class="block text-sm font-medium text-gray-300 mb-1">التعويذة أو الشفرة المراد فكها</label>
+                <textarea id="dec-message" rows="4" class="w-full bg-gray-950 border border-gray-800 rounded-lg p-3 text-gray-100 focus:outline-none focus:border-cyan-500" placeholder="الصق الشفرة هنا..."></textarea>
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-300 mb-1">كلمة السر لكسر التعويذة</label>
+                <input type="password" id="dec-key" class="w-full bg-gray-950 border border-gray-800 rounded-lg p-3 text-gray-100 focus:outline-none focus:border-cyan-500" placeholder="أدخل كلمة السر">
+            </div>
+            <button onclick="handleDecrypt()" class="w-full bg-cyan-600 hover:bg-cyan-500 text-white font-bold py-3 rounded-lg transition-all shadow-lg shadow-cyan-900/40">فك التشفير</button>
+            
+            <div id="dec-result-container" class="hidden mt-4">
+                <label class="block text-sm font-medium text-cyan-400 mb-1">النص الأصلي المستخرج:</label>
+                <textarea id="dec-result" readonly rows="3" class="w-full bg-gray-950 border border-cyan-800/50 rounded-lg p-3 text-cyan-300 text-sm"></textarea>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function switchTab(tab) {
+            const encTab = document.getElementById('tab-encrypt');
+            const decTab = document.getElementById('tab-decrypt');
+            const btnEnc = document.getElementById('btn-encrypt');
+            const btnDec = document.getElementById('btn-decrypt');
+
+            if (tab === 'encrypt') {
+                encTab.classList.remove('hidden');
+                decTab.classList.add('hidden');
+                btnEnc.className = "flex-1 pb-3 text-center font-bold text-emerald-400 border-b-2 border-emerald-400 transition-all";
+                btnDec.className = "flex-1 pb-3 text-center font-bold text-gray-400 hover:text-gray-200 transition-all";
+            } else {
+                decTab.classList.remove('hidden');
+                encTab.classList.add('hidden');
+                btnDec.className = "flex-1 pb-3 text-center font-bold text-cyan-400 border-b-2 border-cyan-400 transition-all";
+                btnEnc.className = "flex-1 pb-3 text-center font-bold text-gray-400 hover:text-gray-200 transition-all";
+            }
+        }
+
+        async function handleEncrypt() {
+            const message = document.getElementById('enc-message').value;
+            const secret_key = document.getElementById('enc-key').value;
+            if (!message || !secret_key) return alert('الرجاء إدخال الرسالة وكلمة السر');
+
+            const formData = new FormData();
+            formData.append('message', message);
+            formData.append('secret_key', secret_key);
+
+            const res = await fetch('/api/encrypt-text', { method: 'POST', body: formData });
+            const data = await res.json();
+
+            if (data.status === 'success') {
+                document.getElementById('enc-result-container').classList.remove('hidden');
+                document.getElementById('enc-result').value = data.result;
+            } else {
+                alert('حدث خطأ أثناء التشفير');
+            }
+        }
+
+        async function handleDecrypt() {
+            const encrypted_message = document.getElementById('dec-message').value;
+            const secret_key = document.getElementById('dec-key').value;
+            if (!encrypted_message || !secret_key) return alert('الرجاء إدخال الشفرة وكلمة السر');
+
+            const formData = new FormData();
+            formData.append('encrypted_message', encrypted_message);
+            formData.append('secret_key', secret_key);
+
+            const res = await fetch('/api/decrypt-text', { method: 'POST', body: formData });
+            const data = await res.json();
+
+            if (data.status === 'success') {
+                document.getElementById('dec-result-container').classList.remove('hidden');
+                document.getElementById('dec-result').value = data.result;
+            } else {
+                alert('فشل فك التشفير، تأكد من صحة الكود أو كلمة السر.');
+            }
+        }
+
+        function copyResult() {
+            const text = document.getElementById('enc-result');
+            text.select();
+            navigator.clipboard.writeText(text.value);
+            alert('تم نسخ التعويذة إلى الحافظة بنجاح!');
+        }
+    </script>
+</body>
+</html>
