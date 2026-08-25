@@ -12,8 +12,6 @@ import pyperclip
 from rich.progress import Progress
 from rich.text import Text
 from pathlib import Path
-import tkinter as tk
-from tkinter import filedialog
 
 console = Console()
 
@@ -27,20 +25,29 @@ def clear_screen():
     os.system('cls' if os.name == 'nt' else 'clear')
 
 def get_file_dialog(dialog_type: str, title: str, default_ext: str = "", file_types: list = None, initial_dir: Path = None, initial_file: str = ""):
-    """يفتح نافذة اختيار/حفظ ملف رسومية."""
-    root = tk.Tk()
-    root.withdraw()  # إخفاء النافذة الرئيسية لـ tkinter
-    root.attributes('-topmost', True) # إظهار النافذة في المقدمة
+    """يطلب مسار الملف عبر الترمنل بدلاً من النافذة الرسومية ليعمل بدون أخطاء في السيرفرات."""
+    start_dir = initial_dir or Path.cwd()
     
-    # استخدم المجلد المبدئي المحدد أو مجلد المستخدم الرئيسي كخيار افتراضي
-    start_dir = initial_dir or Path.home()
-
+    console.print(f"\n[bold yellow]-- {title} --[/bold yellow]")
+    
     if dialog_type == 'open':
-        path = filedialog.askopenfilename(title=title, filetypes=file_types or [], initialdir=start_dir)
+        path_str = Prompt.ask("[cyan]📂 أدخل مسار الملف (يمكنك سحب وإفلات الملف في الترمنل)[/cyan]")
     else: # save
-        path = filedialog.asksaveasfilename(title=title, defaultextension=default_ext, filetypes=file_types or [], initialdir=start_dir, initialfile=initial_file)
-    root.destroy()
-    return Path(path) if path else None
+        suggested_path = start_dir / (initial_file if initial_file else f"output{default_ext}")
+        path_str = Prompt.ask("[cyan]💾 أدخل مسار حفظ الملف (أو اضغط Enter للمسار الافتراضي)[/cyan]", default=str(suggested_path))
+        
+    if not path_str:
+        return None
+        
+    # تنظيف المسار من علامات التنصيص الناتجة عن السحب والإفلات في بعض أنظمة التشغيل
+    path_str = path_str.strip('\'"& ') 
+    path = Path(path_str)
+    
+    if dialog_type == 'open' and not path.is_file():
+        console.print("[bold red]❌ خطأ: الملف غير موجود أو المسار غير صحيح![/bold red]")
+        return None
+        
+    return path
 
 def main_menu():
     """يعرض القائمة الرئيسية للتطبيق."""
@@ -58,9 +65,7 @@ def main_menu():
 
 def show_result(title, content, style, emoji, no_wrap=False):
     """يعرض نتيجة العملية داخل لوحة منسقة."""
-    # Create a Text object from the content.
     renderable = Text.from_markup(f"[b]{content}[/b]")
-    # Set the no_wrap property if needed. This is compatible with older versions.
     if no_wrap:
         renderable.no_wrap = True
     console.print(Panel(renderable, title=f"{emoji} {title}", border_style=style, padding=(1, 2)))
@@ -80,9 +85,8 @@ def run_application():
                 console.print("\n[yellow]--==[ 1. التشفير ]==--[/yellow]")
                 message = Prompt.ask("[cyan]📝 أدخل الرسالة المراد تشفيرها[/cyan]")
                 secret_key = Prompt.ask("[cyan]🔑 أدخل كلمة السر[/cyan]")
-                processed_message = message # استخدام الرسالة مباشرة لدعم الأحرف الصغيرة والكبيرة
+                processed_message = message 
 
-                # حساب عدد الأحرف المدعومة فقط لشريط التقدم
                 supported_chars_count = sum(1 for char in processed_message if char in config.SUPPORTED_CHARS)
 
                 with Progress(console=console) as progress:
@@ -91,7 +95,6 @@ def run_application():
                         progress.update(task, advance=1)
                     encrypted_msg = encrypt_message(processed_message, secret_key, progress_callback=progress_callback)
 
-                # عرض النص المشفر مع السماح بتقسيمه على عدة أسطر لسهولة القراءة
                 show_result("تم تحويل الرسالة إلى تعويذة بنجاح!", encrypted_msg, "green", "✅")
 
                 did_encrypt = True
@@ -107,11 +110,8 @@ def run_application():
                 encrypted_msg = Prompt.ask("[cyan]📝 الصق الشفرة هنا[/cyan]")
                 secret_key = Prompt.ask("[cyan]🔑 أدخل كلمة السر لكسر التعويذة[/cyan]")
 
-                # بما أن عدد الخطوات الحقيقي (الكلمات) غير معروف إلا بعد فك تشفير الترويسة،
-                # سنجعل شريط التقدم غير محدد في البداية، وسيتم تحديثه من دالة فك التشفير.
                 with Progress(console=console) as progress:
                     task = progress.add_task("[cyan]جاري فك التشفير...[/cyan]", total=None)
-                    # نمرر كائن شريط التقدم والمهمة مباشرة للدالة
                     decrypted_msg, _ = decrypt_message(encrypted_msg, secret_key, progress=progress, task_id=task)
 
                 show_result("تم فك التشفير واستخراج النص بنجاح!", decrypted_msg, "green", "✅")
@@ -131,21 +131,17 @@ def run_application():
                 is_text_file = input_file.suffix.lower() in TEXT_EXTENSIONS
 
                 if is_text_file:
-                    # التعامل مع الملفات النصية: تشفير المحتوى فقط بنفس الامتداد
                     mode = 'text'
                     suggested_name = f"{input_file.stem}.encrypted{input_file.suffix}"
                     output_file = get_file_dialog('save', "حفظ الملف المشفر باسم",
                                                   default_ext=input_file.suffix,
-                                                  file_types=[(f"Encrypted {input_file.suffix.upper()} file", f"*{input_file.suffix}"), ("All files", "*.*")],
                                                   initial_dir=input_file.parent,
                                                   initial_file=suggested_name)
                 else:
-                    # التعامل مع الملفات الثنائية: تشفير الملف بالكامل بامتداد .nava
                     mode = 'binary'
                     suggested_name = input_file.name + ".nava"
                     output_file = get_file_dialog('save', "حفظ الملف المشفر باسم",
                                                   default_ext=".nava",
-                                                  file_types=[("Nava Encrypted File", "*.nava"), ("All files", "*.*")],
                                                   initial_dir=input_file.parent,
                                                   initial_file=suggested_name)
 
@@ -159,29 +155,25 @@ def run_application():
 
                 secret_key = Prompt.ask("[cyan]🔑 أدخل كلمة السر[/cyan]")
 
-                # --- Pass 1: Count characters for progress bar and header ---
                 num_real_words = 0
                 if mode == 'text':
-                    # This is still not perfectly efficient for huge text files, but avoids loading all content.
                     with input_file.open('r', encoding='utf-8', errors='ignore') as f:
                         num_real_words = sum(1 for line in f for char in line if char in config.SUPPORTED_CHARS)
-                else:  # binary
-                    # For binary, all base64 chars are supported. Length can be calculated from file size.
+                else: 
                     file_size = input_file.stat().st_size
                     num_real_words = (file_size + 2) // 3 * 4
 
-                # --- Pass 2: Create generator and encrypt stream ---
                 def input_generator():
                     if mode == 'text':
                         with input_file.open('r', encoding='utf-8', errors='ignore') as f:
                             while True:
-                                char = f.read(4096) # Read in chunks
+                                char = f.read(4096) 
                                 if not char: break
                                 yield from char
-                    else:  # binary
+                    else:  
                         with input_file.open('rb') as f:
                             while True:
-                                chunk = f.read(3 * 1024)  # Read in chunks of 3k bytes for efficient base64 encoding
+                                chunk = f.read(3 * 1024)  
                                 if not chunk: break
                                 yield from base64.b64encode(chunk).decode('ascii')
 
@@ -201,14 +193,13 @@ def run_application():
         elif choice == '4': # فك تشفير ملف
             try:
                 console.print("\n[yellow]--==[ 4. فك تشفير ملف ]==--[/yellow]")
-                input_file = get_file_dialog('open', "اختر الملف المشفر", file_types=[("All files", "*.*")])
+                input_file = get_file_dialog('open', "اختر الملف المشفر")
                 if not input_file:
                     console.print("[yellow]تم إلغاء العملية.[/yellow]")
                     continue
 
-                # اقتراح اسم ملف الإخراج بناءً على اسم ملف الإدخال
                 if input_file.name.endswith('.nava'):
-                    suggested_name = input_file.name[:-5] # إزالة .nava
+                    suggested_name = input_file.name[:-5] 
                 elif '.encrypted' in input_file.name:
                     suggested_name = input_file.name.replace('.encrypted', '', 1)
                 else:
@@ -216,8 +207,8 @@ def run_application():
 
                 output_file = get_file_dialog('save', "حفظ الملف الأصلي باسم",
                                               initial_dir=input_file.parent,
-                                              initial_file=suggested_name,
-                                              file_types=[("All files", "*.*")])
+                                              initial_file=suggested_name)
+                
                 if not output_file:
                     console.print("[yellow]تم إلغاء العملية.[/yellow]")
                     continue
@@ -229,7 +220,7 @@ def run_application():
                 secret_key = Prompt.ask("[cyan]🔑 أدخل كلمة السر[/cyan]")
 
                 with Progress(console=console) as progress:
-                    task = progress.add_task("[cyan]جاري فك تشفير الملف...[/cyan]", total=None) # Total will be set inside
+                    task = progress.add_task("[cyan]جاري فك تشفير الملف...[/cyan]", total=None) 
                     decrypt_file(input_file, output_file, secret_key, progress=progress, task_id=task)
 
                 show_result("تم فك تشفير الملف بنجاح!", f"تم حفظ الملف الأصلي في:\n{output_file.resolve()}", "green", "✅")
@@ -241,7 +232,6 @@ def run_application():
             console.print("\n[bold magenta]👋 إلى اللقاء![/bold magenta]")
             break
         
-        # انتظار المستخدم قبل العودة للقائمة الرئيسية
         prompt_message = "\n[dim yellow]اضغط على Enter للعودة إلى القائمة الرئيسية...[/dim yellow]"
         if did_encrypt:
             prompt_message = "\n[cyan]اضغط [bold]'a'[/bold] لنسخ النص، أو [bold]Enter[/bold] للعودة...[/cyan]"
@@ -252,7 +242,6 @@ def run_application():
             try:
                 pyperclip.copy(encrypted_text_to_copy)
                 console.print("[bold green]📋 تم النسخ إلى الحافظة.[/bold green]")
-                # انتظر المستخدم ليقرأ الرسالة قبل مسح الشاشة
                 Prompt.ask("\n[dim yellow]اضغط على Enter للمتابعة...[/dim yellow]")
             except pyperclip.PyperclipException:
                 error_message = (
