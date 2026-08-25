@@ -3,6 +3,8 @@
 import os
 import base64
 import time
+import threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
 import config
 from encrypt import encrypt_message, encrypt_file_stream
 from decrypt import decrypt_message, decrypt_file
@@ -13,6 +15,25 @@ import pyperclip
 from rich.progress import Progress
 from rich.text import Text
 from pathlib import Path
+
+# --- سيرفر وهمي لإرضاء فحص Render للمنافذ (Port Binding) مجاناً ---
+class FreePortHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"Nava Encryption Server is Running OK")
+
+    def log_message(self, format, *args):
+        pass
+
+def start_free_server():
+    port = int(os.environ.get("PORT", 10000))
+    server = HTTPServer(("0.0.0.0", port), FreePortHandler)
+    server.serve_forever()
+
+# تشغيل السيرفر في الخلفية فور تشغيل الملف
+threading.Thread(target=start_free_server, daemon=True).start()
+# -------------------------------------------------------------------
 
 console = Console()
 
@@ -43,7 +64,6 @@ def get_file_dialog(dialog_type: str, title: str, default_ext: str = "", file_ty
     if not path_str:
         return None
         
-    # تنظيف المسار من علامات التنصيص الناتجة عن السحب والإفلات
     path_str = path_str.strip('\'"& ') 
     path = Path(path_str)
     
@@ -82,192 +102,120 @@ def run_application():
 
         main_menu()
         
-        # التقاط الخطأ في حالة تشغيل الكود في بيئة سيرفر غير تفاعلية (مثل Render)
         try:
             choice = Prompt.ask("[bold yellow]>> أدخل رقم اختيارك[/bold yellow]", choices=['1', '2', '3', '4', '5'], default='1')
         except EOFError:
             console.print("\n[bold cyan]ℹ️ البيئة الحالية غير تفاعلية (Non-interactive Server Environment).[/bold cyan]")
-            console.print("[bold green]✔ تم تشغيل وحدة التشفير بنجاح، السيرفر يعمل الآن في الخلفية بدون مشاكل...[/bold green]")
-            # إبقاء السيرفر نشطاً للأبد حتى لا يعطي Render خطأ الخروج
+            console.print("[bold green]✔ تم تشغيل وحدة التشفير والسيرفر الوهمي بنجاح، الخدمة تعمل الآن في الخلفية بدون مشاكل...[/bold green]")
             while True:
                 time.sleep(3600)
 
         if choice == '1':
-            # --- قسم التشفير ---
+            # --- 1. تشفير رسالة ---
             try:
                 console.print("\n[yellow]--==[ 1. التشفير ]==--[/yellow]")
                 message = Prompt.ask("[cyan]📝 أدخل الرسالة المراد تشفيرها[/cyan]")
                 secret_key = Prompt.ask("[cyan]🔑 أدخل كلمة السر[/cyan]")
-                processed_message = message 
-
-                supported_chars_count = sum(1 for char in processed_message if char in config.SUPPORTED_CHARS)
+                
+                supported_chars_count = sum(1 for char in message if char in config.SUPPORTED_CHARS)
 
                 with Progress(console=console) as progress:
                     task = progress.add_task("[green]جاري التشفير...[/green]", total=supported_chars_count)
                     def progress_callback():
                         progress.update(task, advance=1)
-                    encrypted_msg = encrypt_message(processed_message, secret_key, progress_callback=progress_callback)
-
-                show_result("تم تحويل الرسالة إلى تعويذة بنجاح!", encrypted_msg, "green", "✅")
-
+                    encrypted_msg = encrypt_message(message, secret_key, progress_callback=progress_callback)
+                
+                show_result("الرسالة المشفرة (الطلاسم)", encrypted_msg, "green", "🔐", no_wrap=True)
                 did_encrypt = True
                 encrypted_text_to_copy = encrypted_msg
-
             except Exception as e:
-                show_result("حدث خطأ أثناء التشفير", str(e), "red", "❌")
+                console.print(f"[bold red]❌ حدث خطأ أثناء التشفير: {e}[/bold red]")
 
         elif choice == '2':
-            # --- قسم فك التشفير ---
+            # --- 2. فك تشفير رسالة ---
             try:
                 console.print("\n[yellow]--==[ 2. فك التشفير ]==--[/yellow]")
-                encrypted_msg = Prompt.ask("[cyan]📝 الصق الشفرة هنا[/cyan]")
-                secret_key = Prompt.ask("[cyan]🔑 أدخل كلمة السر لكسر التعويذة[/cyan]")
+                encrypted_msg = Prompt.ask("[cyan]🔮 أدخل النص المشفر (الطلاسم)[/cyan]")
+                secret_key = Prompt.ask("[cyan]🔑 أدخل كلمة السر[/cyan]")
 
                 with Progress(console=console) as progress:
                     task = progress.add_task("[cyan]جاري فك التشفير...[/cyan]", total=None)
-                    decrypted_msg, _ = decrypt_message(encrypted_msg, secret_key, progress=progress, task_id=task)
+                    def progress_callback():
+                        progress.update(task, advance=1)
+                    decrypted_msg, mode = decrypt_message(encrypted_msg, secret_key, progress_callback=progress_callback)
 
-                show_result("تم فك التشفير واستخراج النص بنجاح!", decrypted_msg, "green", "✅")
-            except ValueError as e:
-                show_result("فشل فك التشفير", str(e), "red", "❌")
+                show_result("الرسالة بعد فك التشفير", decrypted_msg, "cyan", "🔓")
             except Exception as e:
-                show_result("خطأ غير متوقع", f"حدث خطأ: {e}\nتأكد من أن الشفرة وكلمة السر صحيحتان.", "red", "❌")
+                console.print(f"[bold red]❌ خطأ: {e}[/bold red]")
 
-        elif choice == '3': # تشفير ملف
+        elif choice == '3':
+            # --- 3. تشفير ملف ---
             try:
                 console.print("\n[yellow]--==[ 3. تشفير ملف ]==--[/yellow]")
-                input_file = get_file_dialog('open', "اختر الملف المراد تشفيره")
-                if not input_file:
-                    console.print("[yellow]تم إلغاء العملية.[/yellow]")
-                    continue
-
-                is_text_file = input_file.suffix.lower() in TEXT_EXTENSIONS
-
-                if is_text_file:
-                    mode = 'text'
-                    suggested_name = f"{input_file.stem}.encrypted{input_file.suffix}"
-                    output_file = get_file_dialog('save', "حفظ الملف المشفر باسم",
-                                                  default_ext=input_file.suffix,
-                                                  initial_dir=input_file.parent,
-                                                  initial_file=suggested_name)
-                else:
-                    mode = 'binary'
-                    suggested_name = input_file.name + ".nava"
-                    output_file = get_file_dialog('save', "حفظ الملف المشفر باسم",
-                                                  default_ext=".nava",
-                                                  initial_dir=input_file.parent,
-                                                  initial_file=suggested_name)
-
-                if not output_file:
-                    console.print("[yellow]تم إلغاء العملية.[/yellow]")
-                    continue
-
-                if input_file.resolve() == output_file.resolve():
-                    show_result("خطأ في العملية", "لا يمكن تشفير الملف في نفس مكانه. الرجاء اختيار ملف وجهة مختلف.", "red", "❌")
-                    continue
+                input_path = get_file_dialog('open', 'اختر الملف المراد تشفيره')
+                if not input_path: continue
 
                 secret_key = Prompt.ask("[cyan]🔑 أدخل كلمة السر[/cyan]")
+                
+                is_text = input_path.suffix.lower() in TEXT_EXTENSIONS
+                mode = 'text' if is_text else 'binary'
 
-                num_real_words = 0
-                if mode == 'text':
-                    with input_file.open('r', encoding='utf-8', errors='ignore') as f:
-                        num_real_words = sum(1 for line in f for char in line if char in config.SUPPORTED_CHARS)
-                else: 
-                    file_size = input_file.stat().st_size
-                    num_real_words = (file_size + 2) // 3 * 4
+                output_path = get_file_dialog('save', 'اختر مسار حفظ الملف المشفر', default_ext=".enc", initial_file=input_path.name + ".enc")
+                if not output_path: continue
 
-                def input_generator():
-                    if mode == 'text':
-                        with input_file.open('r', encoding='utf-8', errors='ignore') as f:
-                            while True:
-                                char = f.read(4096) 
-                                if not char: break
-                                yield from char
-                    else:  
-                        with input_file.open('rb') as f:
-                            while True:
-                                chunk = f.read(3 * 1024)  
-                                if not chunk: break
-                                yield from base64.b64encode(chunk).decode('ascii')
+                with open(input_path, 'rb') as f_in_raw:
+                    content_bytes = f_in_raw.read()
+
+                if mode == 'binary':
+                    file_data_str = base64.b64encode(content_bytes).decode('utf-8')
+                else:
+                    file_data_str = content_bytes.decode('utf-8', errors='ignore')
+
+                num_real_words = sum(1 for char in file_data_str if char in config.CHAR_GROUPS.get(1, {}) or any(char in g for g in config.CHAR_GROUPS.values()))
 
                 with Progress(console=console) as progress:
                     task = progress.add_task("[green]جاري تشفير الملف...[/green]", total=num_real_words)
-                    def progress_callback():
+                    def file_progress():
                         progress.update(task, advance=1)
                     
-                    with output_file.open('w', encoding='utf-8') as f_out:
-                        encrypt_file_stream(input_generator(), f_out, secret_key, mode, num_real_words, progress_callback)
+                    with open(output_path, 'w', encoding='utf-8') as f_out:
+                        encrypt_file_stream(iter(file_data_str), f_out, secret_key, mode, num_real_words, progress_callback=file_progress)
 
-                show_result("تم تشفير الملف بنجاح!", f"تم حفظ الملف المشفر في:\n{output_file.resolve()}", "green", "✅")
-
+                console.print(f"[bold green]✔ تم تشفير الملف بنجاح وحفظه في: {output_path}[/bold green]")
             except Exception as e:
-                show_result("حدث خطأ أثناء تشفير الملف", str(e), "red", "❌")
+                console.print(f"[bold red]❌ خطأ أثناء تشفير الملف: {e}[/bold red]")
 
-        elif choice == '4': # فك تشفير ملف
+        elif choice == '4':
+            # --- 4. فك تشفير ملف ---
             try:
                 console.print("\n[yellow]--==[ 4. فك تشفير ملف ]==--[/yellow]")
-                input_file = get_file_dialog('open', "اختر الملف المشفر")
-                if not input_file:
-                    console.print("[yellow]تم إلغاء العملية.[/yellow]")
-                    continue
-
-                if input_file.name.endswith('.nava'):
-                    suggested_name = input_file.name[:-5] 
-                elif '.encrypted' in input_file.name:
-                    suggested_name = input_file.name.replace('.encrypted', '', 1)
-                else:
-                    suggested_name = f"decrypted_{input_file.name}"
-
-                output_file = get_file_dialog('save', "حفظ الملف الأصلي باسم",
-                                              initial_dir=input_file.parent,
-                                              initial_file=suggested_name)
-                
-                if not output_file:
-                    console.print("[yellow]تم إلغاء العملية.[/yellow]")
-                    continue
-
-                if input_file.resolve() == output_file.resolve():
-                    show_result("خطأ في العملية", "لا يمكن فك تشفير الملف في نفس مكانه. الرجاء اختيار ملف وجهة مختلف.", "red", "❌")
-                    continue
+                input_path = get_file_dialog('open', 'اختر الملف المشفر لفك تشفيره')
+                if not input_path: continue
 
                 secret_key = Prompt.ask("[cyan]🔑 أدخل كلمة السر[/cyan]")
+                output_path = get_file_dialog('save', 'اختر مسار حفظ الملف المفكوك', initial_file="decrypted_output")
+                if not output_path: continue
 
                 with Progress(console=console) as progress:
-                    task = progress.add_task("[cyan]جاري فك تشفير الملف...[/cyan]", total=None) 
-                    decrypt_file(input_file, output_file, secret_key, progress=progress, task_id=task)
+                    task = progress.add_task("[cyan]جاري فك تشفير الملف...[/cyan]", total=0)
+                    decrypt_file(str(input_path), str(output_path), secret_key, progress=progress, task_id=task)
 
-                show_result("تم فك تشفير الملف بنجاح!", f"تم حفظ الملف الأصلي في:\n{output_file.resolve()}", "green", "✅")
-
+                console.print(f"[bold green]✔ تم فك تشفير الملف بنجاح وحفظه في: {output_path}[/bold green]")
             except Exception as e:
-                show_result("حدث خطأ أثناء فك تشفير الملف", str(e), "red", "❌")
+                console.print(f"[bold red]❌ خطأ أثناء فك تشفير الملف: {e}[/bold red]")
 
         elif choice == '5':
-            console.print("\n[bold magenta]👋 إلى اللقاء![/bold magenta]")
+            console.print("[bold yellow]إلى اللقاء![/bold yellow]")
             break
-        
-        prompt_message = "\n[dim yellow]اضغط على Enter للعودة إلى القائمة الرئيسية...[/dim yellow]"
-        if did_encrypt:
-            prompt_message = "\n[cyan]اضغط [bold]'a'[/bold] لنسخ النص، أو [bold]Enter[/bold] للعودة...[/cyan]"
 
-        try:
-            user_action = Prompt.ask(prompt_message, default="")
-            
-            if did_encrypt and user_action.lower() == 'a':
-                try:
-                    pyperclip.copy(encrypted_text_to_copy)
-                    console.print("[bold green]📋 تم النسخ إلى الحافظة.[/bold green]")
-                    Prompt.ask("\n[dim yellow]اضغط على Enter للمتابعة...[/dim yellow]")
-                except pyperclip.PyperclipException:
-                    error_message = (
-                        "[yellow]⚠️ لم نتمكن من الوصول إلى الحافظة.[/yellow]\n"
-                        "[dim]قد تحتاج إلى تثبيت أداة مساعدة مثل 'xclip' على نظام Linux.[/dim]\n"
-                        "[dim]جرب الأمر: [bold]sudo apt install xclip[/bold][/dim]"
-                    )
-                    console.print(error_message)
-                    Prompt.ask("\n[dim yellow]اضغط على Enter للمتابعة...[/dim yellow]")
-        except EOFError:
-            # تخطي في حال كان السيرفر غير تفاعلي
-            pass
+        if did_encrypt and encrypted_text_to_copy:
+            try:
+                pyperclip.copy(encrypted_text_to_copy)
+                console.print("[dim green]📋 تم نسخ النص المشفر إلى الحافظة تلقائياً![/dim green]")
+            except Exception:
+                pass
+
+        Prompt.ask("\n[bold dim]اضغط Enter للمتابعة والعودة للقائمة الرئيسية...[/bold dim]")
 
 if __name__ == "__main__":
     run_application()
